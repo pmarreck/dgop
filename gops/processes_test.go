@@ -199,6 +199,20 @@ func TestGetPssDirty(t *testing.T) {
 	assert.Error(t, err, "Should error for non-existent PID")
 }
 
+func TestCalculateNormalizedProcessCPUPercentageWithCursor(t *testing.T) {
+	baseTime := time.Now().UnixMilli()
+	cursor := &models.ProcessCursorData{
+		PID:       1234,
+		Ticks:     10.0,
+		Timestamp: baseTime,
+	}
+
+	// +2.0 CPU seconds over 1 second wall time:
+	// raw process CPU = 200%, normalized on 8 cores = 25%.
+	result := calculateNormalizedProcessCPUPercentageWithCursor(cursor, 12.0, baseTime+1000, 8)
+	assert.InDelta(t, 25.0, result, 0.01)
+}
+
 func BenchmarkCalculateProcessCPUPercentage(b *testing.B) {
 	cursor := &models.ProcessCursorData{
 		PID:       1234,

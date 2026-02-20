@@ -42,8 +42,20 @@ jobs:
           version: v2.9
 
   test:
-    name: Test
-    runs-on: ubuntu-24.04
+    name: Test (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            runner: ubuntu-24.04
+          - label: linux-arm64
+            runner: ubuntu-24.04-arm
+          - label: macos-x86_64
+            runner: macos-15-intel
+          - label: macos-arm64
+            runner: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,17 +68,8 @@ jobs:
       - name: Run tests
         run: go test -v ./...
 
-      - name: Run tests with race detector
-        run: go test -race ./...
-
-      - name: Generate coverage report
-        run: go test -coverprofile=coverage.out ./...
-
-      - name: Display coverage
-        run: go tool cover -func=coverage.out
-
-  build:
-    name: Build
+  test-race:
+    name: Test Race (linux-x86_64)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -77,5 +80,38 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Run tests with race detector
+        run: go test -race ./...
+
+      - name: Generate coverage report
+        run: go test -coverprofile=coverage.out ./...
+
+      - name: Display coverage
+        run: go tool cover -func=coverage.out
+
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            runner: ubuntu-24.04
+          - label: linux-arm64
+            runner: ubuntu-24.04-arm
+          - label: macos-x86_64
+            runner: macos-15-intel
+          - label: macos-arm64
+            runner: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
       - name: Build
-        run: make
+        run: go build ./cmd/dgop

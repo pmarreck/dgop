@@ -1,6 +1,8 @@
 package gops
 
 import (
+	"sync"
+
 	"github.com/AvengeMedia/dgop/internal/log"
 	"github.com/AvengeMedia/dgop/models"
 	"github.com/shirou/gopsutil/v4/sensors"
@@ -15,18 +17,22 @@ type GopsUtil struct {
 	hostProvider HostInfoProvider
 	loadProvider LoadInfoProvider
 	fs           FileSystem
+
+	procStaticMu    sync.RWMutex
+	procStaticCache map[int32]processStaticInfo
 }
 
 func NewGopsUtil() *GopsUtil {
 	return &GopsUtil{
-		cpuProvider:  &DefaultCPUInfoProvider{},
-		memProvider:  &DefaultMemoryInfoProvider{},
-		diskProvider: &DefaultDiskInfoProvider{},
-		netProvider:  &DefaultNetworkInfoProvider{},
-		procProvider: &DefaultProcessInfoProvider{},
-		hostProvider: &DefaultHostInfoProvider{},
-		loadProvider: &DefaultLoadInfoProvider{},
-		fs:           &DefaultFileSystem{},
+		cpuProvider:     &DefaultCPUInfoProvider{},
+		memProvider:     &DefaultMemoryInfoProvider{},
+		diskProvider:    &DefaultDiskInfoProvider{},
+		netProvider:     &DefaultNetworkInfoProvider{},
+		procProvider:    &DefaultProcessInfoProvider{},
+		hostProvider:    &DefaultHostInfoProvider{},
+		loadProvider:    &DefaultLoadInfoProvider{},
+		fs:              &DefaultFileSystem{},
+		procStaticCache: make(map[int32]processStaticInfo),
 	}
 }
 
@@ -42,14 +48,15 @@ func NewGopsUtilWithProviders(
 	fs FileSystem,
 ) *GopsUtil {
 	return &GopsUtil{
-		cpuProvider:  cpu,
-		memProvider:  mem,
-		diskProvider: disk,
-		netProvider:  net,
-		procProvider: proc,
-		hostProvider: host,
-		loadProvider: load,
-		fs:           fs,
+		cpuProvider:     cpu,
+		memProvider:     mem,
+		diskProvider:    disk,
+		netProvider:     net,
+		procProvider:    proc,
+		hostProvider:    host,
+		loadProvider:    load,
+		fs:              fs,
+		procStaticCache: make(map[int32]processStaticInfo),
 	}
 }
 

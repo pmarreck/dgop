@@ -16,14 +16,16 @@ type NetworkRateCursor struct {
 
 func (self *GopsUtil) GetNetworkRates(cursorStr string) (*models.NetworkRateResponse, error) {
 	// Get current network stats
-	netIO, err := net.IOCounters(true)
+	netIO, err := self.netProvider.IOCounters(true)
 	if err != nil {
 		return nil, err
 	}
+	ifaces, _ := self.netProvider.Interfaces()
+	ifaceIndex := indexInterfacesByName(ifaces)
 
 	currentStats := make(map[string]net.IOCountersStat)
 	for _, n := range netIO {
-		if matchesNetworkInterface(n.Name) {
+		if isUsableNetworkInterface(n.Name, ifaceIndex) {
 			currentStats[n.Name] = n
 		}
 	}

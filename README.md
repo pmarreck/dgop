@@ -8,6 +8,9 @@
   ### Stateless, cursor-based system and process monitoring
 
 [![Documentation](https://img.shields.io/badge/docs-danklinux.com-9ccbfb?style=for-the-badge&labelColor=101418)](https://danklinux.com/docs/dgop)
+[![Go CI](https://img.shields.io/github/actions/workflow/status/pmarreck/dgop/go-ci.yml?branch=master&style=for-the-badge&labelColor=101418)](https://github.com/pmarreck/dgop/actions/workflows/go-ci.yml)
+[![Nix CI](https://img.shields.io/github/actions/workflow/status/pmarreck/dgop/nix-ci.yml?branch=master&style=for-the-badge&labelColor=101418)](https://github.com/pmarreck/dgop/actions/workflows/nix-ci.yml)
+[![Garnix](https://img.shields.io/endpoint?url=https%3A%2F%2Fgarnix.io%2Fapi%2Fbadges%2Fpmarreck%2Fdgop&style=for-the-badge&labelColor=101418)](https://garnix.io/repo/pmarreck/dgop)
 [![GitHub Release](https://img.shields.io/github/v/release/AvengeMedia/dgop?style=for-the-badge&labelColor=101418&color=a6da95)](https://github.com/AvengeMedia/dgop/releases)
 [![Arch Linux](https://img.shields.io/archlinux/v/extra/x86_64/dgop?style=for-the-badge&labelColor=101418&color=f5a97f)](https://archlinux.org/packages/extra/x86_64/dgop/)
 [![GitHub License](https://img.shields.io/github/license/AvengeMedia/dgop?style=for-the-badge&labelColor=101418&color=b9c8da)](https://github.com/AvengeMedia/dgop/blob/master/LICENSE)

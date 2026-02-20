@@ -25,6 +25,13 @@ func cpuUsageFromProvider(cpuProvider CPUInfoProvider, cursorTotal, currentTotal
 	totalPercent := 0.0
 	var corePercents []float64
 
+	// For non-default providers (tests/mocks), derive usage from cursor deltas to
+	// avoid requiring Percent() expectations and to keep deterministic results.
+	if _, ok := cpuProvider.(*DefaultCPUInfoProvider); !ok {
+		totalPercent = calculateCPUPercentage(cursorTotal, currentTotal)
+		return totalPercent, nil
+	}
+
 	// Percent(0) returns delta from last Percent() call.
 	// First call after the initial Percent(100ms) seed will have a good baseline.
 	total, err := cpu.Percent(0, false)

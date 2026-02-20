@@ -15,6 +15,12 @@ type fetchDataMsg struct {
 	err        error
 	generation int
 	cpuCursor  string
+}
+
+type fetchProcessesMsg struct {
+	processes  []*models.ProcessInfo
+	err        error
+	generation int
 	procCursor string
 }
 
@@ -56,21 +62,17 @@ func killProcess(pid int32, force bool) tea.Cmd {
 func (m *ResponsiveTUIModel) fetchData() tea.Cmd {
 	generation := m.fetchGeneration
 	cpuCursor := m.cpuCursor
-	procCursor := m.procCursor
 	sortBy := m.sortBy
 	procLimit := m.procLimit
-	mergeChildren := m.mergeChildren
 	return func() tea.Msg {
 		params := gops.MetaParams{
-			SortBy:        sortBy,
-			ProcLimit:     procLimit,
-			EnableCPU:     true,
-			MergeChildren: mergeChildren,
-			CPUCursor:     cpuCursor,
-			ProcCursor:    procCursor,
+			SortBy:    sortBy,
+			ProcLimit: procLimit,
+			EnableCPU: true,
+			CPUCursor: cpuCursor,
 		}
 
-		modules := []string{"cpu", "memory", "system", "processes"}
+		modules := []string{"cpu", "memory", "system"}
 		metrics, err := m.gops.GetMeta(context.Background(), modules, params)
 
 		if err != nil {
@@ -97,7 +99,28 @@ func (m *ResponsiveTUIModel) fetchData() tea.Cmd {
 			err:        nil,
 			generation: generation,
 			cpuCursor:  newCPUCursor,
-			procCursor: metrics.Cursor,
+		}
+	}
+}
+
+func (m *ResponsiveTUIModel) fetchProcessData() tea.Cmd {
+	generation := m.fetchGeneration
+	procCursor := m.procCursor
+	sortBy := m.sortBy
+	procLimit := m.procLimit
+	mergeChildren := m.mergeChildren
+
+	return func() tea.Msg {
+		result, err := m.gops.GetProcessesWithCursor(sortBy, procLimit, true, procCursor, mergeChildren)
+		if err != nil {
+			return fetchProcessesMsg{err: err, generation: generation}
+		}
+
+		return fetchProcessesMsg{
+			processes:  result.Processes,
+			err:        nil,
+			generation: generation,
+			procCursor: result.Cursor,
 		}
 	}
 }

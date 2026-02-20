@@ -11,7 +11,16 @@ import (
 
 	"github.com/AvengeMedia/dgop/models"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/shirou/gopsutil/v4/process"
 )
+
+type processStaticInfo struct {
+	Name     string
+	Cmdline  string
+	PPID     int32
+	Username string
+	ExePath  string
+}
 
 func (self *GopsUtil) GetProcesses(sortBy ProcSortBy, limit int, enableCPU bool, mergeChildren bool) (*models.ProcessListResponse, error) {
 	return self.GetProcessesWithCursor(sortBy, limit, enableCPU, "", mergeChildren)
@@ -50,6 +59,8 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 		time.Sleep(200 * time.Millisecond)
 	}
 
+	self.pruneProcessStaticCache(procs)
+
 	type procResult struct {
 		index int
 		info  *models.ProcessInfo
@@ -83,13 +94,9 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 						}
 					}()
 
-					name, _ := p.Name()
-					cmdline, _ := p.Cmdline()
-					ppid, _ := p.Ppid()
+					staticInfo := self.getProcessStaticInfo(p)
 					memInfo, _ := p.MemoryInfo()
 					times, _ := p.Times()
-					username, _ := p.Username()
-					exePath, _ := p.Exe()
 
 					currentCPUTime := float64(0)
 					if times != nil {
@@ -98,8 +105,12 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 
 					cpuPercent := 0.0
 					if enableCPU {
-						rawCpuPercent, _ := p.CPUPercent()
-						cpuPercent = rawCpuPercent / float64(runtime.NumCPU())
+						if cursorData, ok := cursorMap[p.Pid]; ok {
+							cpuPercent = calculateNormalizedProcessCPUPercentageWithCursor(cursorData, currentCPUTime, currentTime, runtime.NumCPU())
+						} else {
+							rawCpuPercent, _ := p.CPUPercent()
+							cpuPercent = rawCpuPercent / float64(runtime.NumCPU())
+						}
 					}
 
 					rssKB := uint64(0)
@@ -131,7 +142,7 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 						index: idx,
 						info: &models.ProcessInfo{
 							PID:               p.Pid,
-							PPID:              ppid,
+							PPID:              staticInfo.PPID,
 							CPU:               cpuPercent,
 							PTicks:            currentCPUTime,
 							MemoryPercent:     memPercent,
@@ -141,10 +152,10 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 							RSSPercent:        rssPercent,
 							PSSKB:             pssKB,
 							PSSPercent:        pssPercent,
-							Username:          username,
-							Command:           name,
-							FullCommand:       cmdline,
-							ExecutablePath:    exePath,
+							Username:          staticInfo.Username,
+							Command:           staticInfo.Name,
+							FullCommand:       staticInfo.Cmdline,
+							ExecutablePath:    staticInfo.ExePath,
 						},
 					}
 				}()
@@ -212,6 +223,64 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 	}, nil
 }
 
+func (self *GopsUtil) getProcessStaticInfo(p *process.Process) processStaticInfo {
+	pid := p.Pid
+
+	self.procStaticMu.RLock()
+	cached, exists := self.procStaticCache[pid]
+	self.procStaticMu.RUnlock()
+	if exists {
+		return cached
+	}
+
+	name, _ := p.Name()
+	cmdline, _ := p.Cmdline()
+	ppid, _ := p.Ppid()
+	username, _ := p.Username()
+	exePath, _ := p.Exe()
+
+	info := processStaticInfo{
+		Name:     name,
+		Cmdline:  cmdline,
+		PPID:     ppid,
+		Username: username,
+		ExePath:  exePath,
+	}
+
+	self.procStaticMu.Lock()
+	if self.procStaticCache == nil {
+		self.procStaticCache = make(map[int32]processStaticInfo)
+	}
+	if existing, ok := self.procStaticCache[pid]; ok {
+		self.procStaticMu.Unlock()
+		return existing
+	}
+	self.procStaticCache[pid] = info
+	self.procStaticMu.Unlock()
+
+	return info
+}
+
+func (self *GopsUtil) pruneProcessStaticCache(procs []*process.Process) {
+	self.procStaticMu.Lock()
+	defer self.procStaticMu.Unlock()
+
+	if len(self.procStaticCache) == 0 {
+		return
+	}
+
+	active := make(map[int32]struct{}, len(procs))
+	for _, p := range procs {
+		active[p.Pid] = struct{}{}
+	}
+
+	for pid := range self.procStaticCache {
+		if _, ok := active[pid]; !ok {
+			delete(self.procStaticCache, pid)
+		}
+	}
+}
+
 type ProcSortBy string
 
 const (
@@ -251,6 +320,33 @@ func calculateProcessCPUPercentageWithCursor(cursor *models.ProcessCursorData, c
 	}
 
 	cpuPercent := (cpuTimeDiff / wallTimeDiff) * 100.0
+
+	if cpuPercent > 100.0 {
+		cpuPercent = 100.0
+	}
+	if cpuPercent < 0 {
+		cpuPercent = 0
+	}
+
+	return cpuPercent
+}
+
+func calculateNormalizedProcessCPUPercentageWithCursor(cursor *models.ProcessCursorData, currentCPUTime float64, currentTime int64, cpuCount int) float64 {
+	if cpuCount <= 0 {
+		cpuCount = 1
+	}
+	if cursor.Timestamp == 0 || currentCPUTime <= cursor.Ticks {
+		return 0
+	}
+
+	cpuTimeDiff := currentCPUTime - cursor.Ticks
+	wallTimeDiff := float64(currentTime-cursor.Timestamp) / 1000.0
+
+	if wallTimeDiff <= 0 {
+		return 0
+	}
+
+	cpuPercent := ((cpuTimeDiff / wallTimeDiff) * 100.0) / float64(cpuCount)
 
 	if cpuPercent > 100.0 {
 		cpuPercent = 100.0

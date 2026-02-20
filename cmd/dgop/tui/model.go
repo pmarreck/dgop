@@ -38,13 +38,14 @@ func tick() tea.Cmd {
 type colorUpdateMsg struct{}
 
 type ResponsiveTUIModel struct {
-	gops         *gops.GopsUtil
-	colorManager *config.ColorManager
-	metrics      *models.SystemMetrics
-	width        int
-	height       int
-	err          error
-	lastUpdate   time.Time
+	gops              *gops.GopsUtil
+	colorManager      *config.ColorManager
+	metrics           *models.SystemMetrics
+	width             int
+	height            int
+	err               error
+	lastUpdate        time.Time
+	lastProcessUpdate time.Time
 
 	processTable table.Model
 

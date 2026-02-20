@@ -18,7 +18,7 @@ func (m *ResponsiveTUIModel) Init() tea.Cmd {
 	diskMounts, _ := m.gops.GetDiskMounts()
 	m.diskMounts = diskMounts
 
-	cmds := []tea.Cmd{tick(), m.fetchData(), m.fetchTemperatureData()}
+	cmds := []tea.Cmd{tick(), m.fetchData(), m.fetchProcessData(), m.fetchTemperatureData()}
 
 	if m.colorManager != nil {
 		cmds = append(cmds, m.listenForColorChanges())
@@ -76,7 +76,7 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "r":
 			m.fetchGeneration++
-			return m, m.fetchData()
+			return m, tea.Batch(m.fetchData(), m.fetchProcessData())
 		case "d":
 			m.showDetails = !m.showDetails
 		case "x":
@@ -96,7 +96,7 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fetchGeneration++
 			m.sortProcessesLocally()
 			m.updateProcessTable()
-			return m, m.fetchData()
+			return m, m.fetchProcessData()
 		case "m":
 			if m.sortBy == gops.SortByMemory {
 				return m, nil
@@ -105,7 +105,7 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fetchGeneration++
 			m.sortProcessesLocally()
 			m.updateProcessTable()
-			return m, m.fetchData()
+			return m, m.fetchProcessData()
 		case "n":
 			if m.sortBy == gops.SortByName {
 				return m, nil
@@ -114,7 +114,7 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fetchGeneration++
 			m.sortProcessesLocally()
 			m.updateProcessTable()
-			return m, m.fetchData()
+			return m, m.fetchProcessData()
 		case "p":
 			if m.sortBy == gops.SortByPID {
 				return m, nil
@@ -123,11 +123,11 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fetchGeneration++
 			m.sortProcessesLocally()
 			m.updateProcessTable()
-			return m, m.fetchData()
+			return m, m.fetchProcessData()
 		case "g":
 			m.mergeChildren = !m.mergeChildren
 			m.fetchGeneration++
-			return m, m.fetchData()
+			return m, m.fetchProcessData()
 		case "up", "k":
 			oldCursor := m.processTable.Cursor()
 			m.processTable, cmd = m.processTable.Update(msg)
@@ -157,6 +157,9 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if now.Sub(m.lastUpdate) >= time.Second {
 			cmds = append(cmds, m.fetchData())
+		}
+		if now.Sub(m.lastProcessUpdate) >= 2*time.Second {
+			cmds = append(cmds, m.fetchProcessData())
 		}
 
 		if now.Sub(m.lastNetworkUpdate) >= 2*time.Second {
@@ -190,15 +193,33 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.fetchGeneration {
 			return m, nil
 		}
-		m.metrics = msg.metrics
-		if m.metrics != nil {
+		if msg.metrics != nil {
+			if m.metrics == nil {
+				m.metrics = msg.metrics
+			} else {
+				m.metrics.CPU = msg.metrics.CPU
+				m.metrics.Memory = msg.metrics.Memory
+				m.metrics.System = msg.metrics.System
+			}
 			m.metrics.DiskMounts = m.diskMounts
 		}
 		m.err = msg.err
 		m.cpuCursor = msg.cpuCursor
-		m.procCursor = msg.procCursor
 		m.lastUpdate = time.Now()
-		m.updateProcessTable()
+
+	case fetchProcessesMsg:
+		if msg.generation != m.fetchGeneration {
+			return m, nil
+		}
+		if msg.err == nil {
+			if m.metrics == nil {
+				m.metrics = &models.SystemMetrics{}
+			}
+			m.metrics.Processes = msg.processes
+			m.procCursor = msg.procCursor
+			m.lastProcessUpdate = time.Now()
+			m.updateProcessTable()
+		}
 
 	case fetchNetworkMsg:
 		if msg.rates != nil && len(msg.rates.Interfaces) > 0 {
@@ -277,7 +298,7 @@ func (m *ResponsiveTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.killResultMsg = msg.message
 		m.killResultTime = time.Now()
 		m.fetchGeneration++
-		cmds = append(cmds, m.fetchData())
+		cmds = append(cmds, m.fetchProcessData())
 
 	case colorUpdateMsg:
 		m.refreshColorCache()
@@ -994,16 +1015,80 @@ func (m *ResponsiveTUIModel) selectBestNetworkInterface(interfaces []*models.Net
 		return nil
 	}
 
-	var candidates []*models.NetworkRateInfo
+	isIgnored := func(name string) bool {
+		return name == "lo" ||
+			strings.HasPrefix(name, "docker") ||
+			strings.HasPrefix(name, "br-") ||
+			strings.HasPrefix(name, "veth") ||
+			strings.HasPrefix(name, "bridge")
+	}
 
+	isPrimary := func(name string) bool {
+		return strings.HasPrefix(name, "en") ||
+			strings.HasPrefix(name, "eth") ||
+			strings.HasPrefix(name, "wlan") ||
+			strings.HasPrefix(name, "wlp") ||
+			strings.HasPrefix(name, "wlo") ||
+			strings.HasPrefix(name, "eno") ||
+			strings.HasPrefix(name, "enp") ||
+			strings.HasPrefix(name, "ens") ||
+			strings.HasPrefix(name, "utun")
+	}
+
+	var candidates []*models.NetworkRateInfo
 	for _, iface := range interfaces {
-		if iface.Interface == "lo" ||
-			strings.HasPrefix(iface.Interface, "docker") ||
-			strings.HasPrefix(iface.Interface, "br-") ||
-			strings.HasPrefix(iface.Interface, "veth") {
+		if isIgnored(iface.Interface) {
 			continue
 		}
 		candidates = append(candidates, iface)
+	}
+
+	pool := candidates
+	if len(pool) == 0 {
+		pool = interfaces
+	}
+
+	var primary []*models.NetworkRateInfo
+	for _, iface := range pool {
+		if isPrimary(iface.Interface) {
+			primary = append(primary, iface)
+		}
+	}
+	if len(primary) > 0 {
+		pool = primary
+	}
+
+	var bestInterface *models.NetworkRateInfo
+	bestCurrent := -1.0
+	bestTotal := uint64(0)
+
+	for _, iface := range pool {
+		current := iface.RxRate + iface.TxRate
+		total := iface.RxTotal + iface.TxTotal
+
+		if bestInterface == nil ||
+			current > bestCurrent ||
+			(current == bestCurrent && total > bestTotal) {
+			bestInterface = iface
+			bestCurrent = current
+			bestTotal = total
+		}
+	}
+
+	// If all candidates are currently idle, prefer the interface with the most
+	// lifetime traffic in the selected pool.
+	if bestInterface != nil && bestCurrent > 0 {
+		return bestInterface
+	}
+
+	bestInterface = nil
+	bestTotal = 0
+	for _, iface := range pool {
+		total := iface.RxTotal + iface.TxTotal
+		if bestInterface == nil || total > bestTotal {
+			bestInterface = iface
+			bestTotal = total
+		}
 	}
 
 	if len(candidates) == 0 {
@@ -1013,24 +1098,6 @@ func (m *ResponsiveTUIModel) selectBestNetworkInterface(interfaces []*models.Net
 			}
 		}
 		return interfaces[0]
-	}
-
-	var bestInterface *models.NetworkRateInfo
-	var maxActivity uint64
-
-	for _, iface := range candidates {
-		totalActivity := iface.RxTotal + iface.TxTotal
-		currentActivity := uint64(iface.RxRate + iface.TxRate)
-
-		score := totalActivity
-		if currentActivity > 0 {
-			score += currentActivity * 1000
-		}
-
-		if bestInterface == nil || score > maxActivity {
-			bestInterface = iface
-			maxActivity = score
-		}
 	}
 
 	return bestInterface
